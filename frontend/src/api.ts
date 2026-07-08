@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-export const api = axios.create({ baseURL: '/api' });
+// Same-origin '/api' by default (local dev via Vite proxy). In production set
+// VITE_API_URL to the backend's public URL, e.g. https://psk-backend.vercel.app/api
+export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? '/api' });
 
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem('psk_token');
