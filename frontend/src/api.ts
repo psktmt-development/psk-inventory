@@ -55,6 +55,15 @@ export const num = (n: number | string | null | undefined, dp = 2) =>
 export const mt = (n: number | string | null | undefined) =>
   n == null ? '—' : `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })} MT`;
 
+// Format a date as DD-MM-YYYY. Accepts a 'YYYY-MM-DD' string (or ISO/Date) and
+// reads the calendar parts directly to avoid any timezone shifting.
+export const fmtDate = (d: string | Date | null | undefined): string => {
+  if (!d) return '—';
+  const s = typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
+  const [y, m, day] = s.split('-');
+  return y && m && day ? `${day}-${m}-${y}` : String(d);
+};
+
 // Consistent, accessible categorical palette (used across all charts)
 export const PALETTE = ['#2563eb', '#16a34a', '#f59e0b', '#db2777', '#7c3aed', '#0891b2', '#dc2626'];
 export const STATUS_COLORS: Record<string, string> = {

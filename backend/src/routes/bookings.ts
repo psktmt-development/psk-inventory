@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/pool.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { getDefaultProductId } from '../services/product.js';
+import { getProductIdForSize } from '../services/product.js';
 
 export const bookingsRouter = Router();
 bookingsRouter.use(requireAuth);
@@ -17,6 +17,7 @@ const createSchema = z.object({
   items: z
     .array(
       z.object({
+        size_mm: z.number().int(),
         booked_qty: z.number().positive(),
         purchase_rate: z.number().nonnegative().default(0),
       }),
@@ -33,7 +34,9 @@ bookingsRouter.get(
              COUNT(bi.booking_item_id)::int AS item_count,
              COALESCE(SUM(bi.booked_qty),0) AS total_booked,
              COALESCE(SUM(bi.balance_qty),0) AS total_balance,
-             COALESCE(SUM(bi.booked_qty*bi.purchase_rate)/NULLIF(SUM(bi.booked_qty),0),0) AS avg_rate
+             COALESCE(SUM(bi.booked_qty*bi.purchase_rate)/NULLIF(SUM(bi.booked_qty),0),0) AS avg_rate,
+             COALESCE(SUM(bi.booked_qty*bi.purchase_rate),0) AS payable,
+             COALESCE((SELECT SUM(sp.amount) FROM supplier_payments sp WHERE sp.booking_id = b.booking_id),0) AS paid
         FROM bookings b
         JOIN factories f ON f.factory_id = b.factory_id
         LEFT JOIN booking_items bi ON bi.booking_id = b.booking_id
@@ -73,9 +76,9 @@ bookingsRouter.post(
         [body.factory_id, body.booking_date ?? null, body.brand ?? null, req.user!.user_id],
       );
       const booking = b[0];
-      const productId = await getDefaultProductId(client);
       const items = [];
       for (const it of body.items) {
+        const productId = await getProductIdForSize(it.size_mm, client);
         // Booked stock is immediately Available for sale; received_date = booking date drives FIFO order.
         const { rows } = await client.query(
           `INSERT INTO booking_items

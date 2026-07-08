@@ -1,7 +1,7 @@
 import { Card, Col, Row, Statistic, Table, Tag } from 'antd';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
-import { STATUS_COLORS } from '../../api';
+import { fmtDate, STATUS_COLORS } from '../../api';
 
 interface Dispatch {
   saleStatus: { status: string; orders: number }[];
@@ -35,7 +35,7 @@ export default function DispatchTracking() {
                   { title: 'Dealer', dataIndex: 'dealer_name' },
                   { title: 'Area', dataIndex: 'area' },
                   { title: 'Destination', dataIndex: 'delivery_location' },
-                  { title: 'Dispatch Date', dataIndex: 'dispatch_date', render: (d) => d?.slice(0, 10) },
+                  { title: 'Dispatch Date', dataIndex: 'dispatch_date', render: fmtDate },
                   { title: 'Delivery', dataIndex: 'delivery_status', render: (s) => <Tag color={s === 'Delivered' ? 'green' : 'orange'}>{s}</Tag> },
                   { title: 'Sale', dataIndex: 'sale_status', render: (s) => <Tag color={STATUS_COLORS[s]}>{s}</Tag> },
                 ]} />

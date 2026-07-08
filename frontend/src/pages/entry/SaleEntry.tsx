@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react';
 import { Alert, App, Button, Card, DatePicker, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { PlusOutlined, DeleteOutlined, TruckOutlined, CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { api, apiError, inr, mt, STATUS_COLORS } from '../../api';
+import { api, apiError, fmtDate, inr, mt, STATUS_COLORS } from '../../api';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 import { useAuth } from '../../auth';
+
+const SIZES = [8, 10, 12, 16, 20, 25, 32];
 
 export default function SaleEntry() {
   const { message } = App.useApp();
@@ -26,25 +28,28 @@ export default function SaleEntry() {
 
   const dealer = useMemo(() => (dealers.data ?? []).find((d) => d.dealer_id === dealerId), [dealers.data, dealerId]);
 
-  // Live available-stock check per sale line (Available lots only, same factory).
+  // Live available-stock check per sale line (Available lots only, same factory + size).
   const items = Form.useWatch('items', form) as any[] | undefined;
+  const key = (factoryId: number, size: number) => `${factoryId}:${size}`;
   const stockMap = useMemo(() => {
-    const m = new Map<number, number>();
-    (stock.data ?? []).forEach((r) => m.set(r.factory_id, (m.get(r.factory_id) ?? 0) + Number(r.available_qty)));
+    const m = new Map<string, number>();
+    (stock.data ?? []).forEach((r) => m.set(key(r.factory_id, r.size_mm), (m.get(key(r.factory_id, r.size_mm)) ?? 0) + Number(r.available_qty)));
     return m;
   }, [stock.data]);
   const stockIssues = useMemo(() => {
-    // Aggregate demand per factory across ALL lines (two lines can hit the same lot pool).
-    const demand = new Map<number, number>();
+    // Aggregate demand per factory+size across ALL lines (two lines can hit the same lot pool).
+    const demand = new Map<string, number>();
     (items ?? []).forEach((l) => {
-      if (l?.factory_id && l?.sale_qty) {
-        demand.set(l.factory_id, (demand.get(l.factory_id) ?? 0) + Number(l.sale_qty));
+      if (l?.factory_id && l?.size_mm && l?.sale_qty) {
+        const k = key(l.factory_id, l.size_mm);
+        demand.set(k, (demand.get(k) ?? 0) + Number(l.sale_qty));
       }
     });
     return (items ?? []).map((l) => {
-      if (!l?.factory_id) return null;
-      const avail = stockMap.get(l.factory_id) ?? 0;
-      const dem = demand.get(l.factory_id) ?? 0;
+      if (!l?.factory_id || !l?.size_mm) return null;
+      const k = key(l.factory_id, l.size_mm);
+      const avail = stockMap.get(k) ?? 0;
+      const dem = demand.get(k) ?? 0;
       return { avail, dem, exceeded: dem - avail > 1e-9 };
     });
   }, [items, stockMap]);
@@ -60,7 +65,7 @@ export default function SaleEntry() {
       sale_invoice_no: v.sale_invoice_no,
       payment_type: v.payment_type,
       credit_days: v.payment_type === 'Credit' ? v.credit_days : null,
-      items: (v.items ?? []).map((it: any) => ({ factory_id: it.factory_id, sale_qty: it.sale_qty, sale_rate: it.sale_rate, purchase_invoice_no: it.purchase_invoice_no })),
+      items: (v.items ?? []).map((it: any) => ({ factory_id: it.factory_id, size_mm: it.size_mm, sale_qty: it.sale_qty, sale_rate: it.sale_rate, purchase_invoice_no: it.purchase_invoice_no })),
     };
   };
 
@@ -117,7 +122,7 @@ export default function SaleEntry() {
             onRow={(r) => ({ onClick: () => openDetail(r.sale_id), style: { cursor: 'pointer' } })}
             columns={[
               { title: 'Invoice', dataIndex: 'sale_invoice_no', render: (v, r) => v ?? `#${r.sale_id}` },
-              { title: 'Date', dataIndex: 'sale_date', render: (d) => d?.slice(0, 10) },
+              { title: 'Date', dataIndex: 'sale_date', render: fmtDate },
               { title: 'Dealer', dataIndex: 'dealer_name' },
               { title: 'Area', dataIndex: 'area' },
               { title: 'Sales Person', dataIndex: 'sales_person_name' },
@@ -165,6 +170,7 @@ export default function SaleEntry() {
                 <Table dataSource={fields} pagination={false} size="small" rowKey="key"
                   columns={[
                     { title: 'Factory', render: (_, f: any) => <Form.Item name={[f.name, 'factory_id']} rules={[{ required: true }]} noStyle><Select showSearch optionFilterProp="label" style={{ width: 150 }} placeholder="Factory" options={(factories.data ?? []).map((x) => ({ value: x.factory_id, label: x.name }))} /></Form.Item> },
+                    { title: 'Size', render: (_, f: any) => <Form.Item name={[f.name, 'size_mm']} rules={[{ required: true, message: 'Size' }]} noStyle><Select style={{ width: 100 }} placeholder="Size" options={SIZES.map((s) => ({ value: s, label: `${s} mm` }))} /></Form.Item> },
                     { title: 'Qty (MT)', render: (_, f: any) => <Form.Item name={[f.name, 'sale_qty']} rules={[{ required: true }]} noStyle><InputNumber min={0.001} style={{ width: 100 }} status={stockIssues[f.name]?.exceeded ? 'error' : undefined} /></Form.Item> },
                     { title: 'Rate', render: (_, f: any) => <Form.Item name={[f.name, 'sale_rate']} rules={[{ required: true }]} noStyle><InputNumber min={0} style={{ width: 110 }} /></Form.Item> },
                     { title: 'Purchase Inv', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_invoice_no']} noStyle><Input style={{ width: 130 }} placeholder="brand invoice" /></Form.Item> },
@@ -216,7 +222,7 @@ export default function SaleEntry() {
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 12 }}>
               <Descriptions.Item label="Dealer">{detail.dealer_name}</Descriptions.Item>
               <Descriptions.Item label="Sales Person">{detail.sales_person_name}</Descriptions.Item>
-              <Descriptions.Item label="Type"><Tag color={STATUS_COLORS[detail.payment_type]}>{detail.payment_type}</Tag>{detail.payment_type === 'Credit' && detail.credit_date ? <span style={{ marginLeft: 8, color: '#888' }}>due {detail.credit_date.slice(0, 10)}{detail.credit_days != null ? ` (${detail.credit_days}d)` : ''}</span> : null}</Descriptions.Item>
+              <Descriptions.Item label="Type"><Tag color={STATUS_COLORS[detail.payment_type]}>{detail.payment_type}</Tag>{detail.payment_type === 'Credit' && detail.credit_date ? <span style={{ marginLeft: 8, color: '#888' }}>due {fmtDate(detail.credit_date)}{detail.credit_days != null ? ` (${detail.credit_days}d)` : ''}</span> : null}</Descriptions.Item>
               <Descriptions.Item label="Status"><Tag color={STATUS_COLORS[detail.status]}>{detail.status}</Tag></Descriptions.Item>
               <Descriptions.Item label="Total">{inr(detail.total_amount)}</Descriptions.Item>
               <Descriptions.Item label="Balance Due">{inr(detail.balance_due)}</Descriptions.Item>
@@ -224,6 +230,7 @@ export default function SaleEntry() {
             <Table title={() => 'Line items'} rowKey="sale_item_id" dataSource={detail.items} pagination={false} size="small"
               columns={[
                 { title: 'Factory', dataIndex: 'factory_name' },
+                { title: 'Size', dataIndex: 'size_mm', render: (v) => `${v} mm` },
                 { title: 'Qty', dataIndex: 'sale_qty', align: 'right', render: mt },
                 { title: 'Rate', dataIndex: 'sale_rate', align: 'right', render: inr },
                 { title: 'Total', dataIndex: 'line_total', align: 'right', render: inr },
@@ -244,10 +251,10 @@ export default function SaleEntry() {
                   extra={dd.delivery_status === 'In-Transit' && canWrite && <Button size="small" icon={<CheckOutlined />} onClick={() => markDelivered(dd.dispatch_id)}>Mark delivered</Button>}>
                   <Descriptions.Item label="Truck">{dd.truck_number}</Descriptions.Item>
                   <Descriptions.Item label="Driver">{dd.driver_name ?? '—'} {dd.driver_phone ? `(${dd.driver_phone})` : ''}</Descriptions.Item>
-                  <Descriptions.Item label="Dispatch date">{dd.dispatch_date?.slice(0, 10)}</Descriptions.Item>
+                  <Descriptions.Item label="Dispatch date">{fmtDate(dd.dispatch_date)}</Descriptions.Item>
                   <Descriptions.Item label="Destination">{dd.delivery_location ?? '—'}</Descriptions.Item>
                   <Descriptions.Item label="Delivery"><Tag color={dd.delivery_status === 'Delivered' ? 'green' : 'orange'}>{dd.delivery_status}</Tag></Descriptions.Item>
-                  <Descriptions.Item label="Delivered on">{dd.delivered_date?.slice(0, 10) ?? '—'}</Descriptions.Item>
+                  <Descriptions.Item label="Delivered on">{fmtDate(dd.delivered_date)}</Descriptions.Item>
                 </Descriptions>
               ))
             ) : detail.status === 'Cancelled' ? (

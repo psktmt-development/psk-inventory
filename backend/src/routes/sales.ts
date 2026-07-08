@@ -4,7 +4,7 @@ import { query, withTransaction } from '../db/pool.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { fifoAllocate, type AllocationResult } from '../services/allocation.js';
-import { getDefaultProductId } from '../services/product.js';
+import { getProductIdForSize } from '../services/product.js';
 
 export const salesRouter = Router();
 salesRouter.use(requireAuth);
@@ -21,6 +21,7 @@ const saleSchema = z.object({
     .array(
       z.object({
         factory_id: z.number().int(),
+        size_mm: z.number().int(),
         sale_qty: z.number().positive(),
         sale_rate: z.number().nonnegative(),
         purchase_invoice_no: z.string().optional().nullable(),
@@ -106,8 +107,8 @@ salesRouter.post(
         [body.dealer_id, body.payment_type],
       );
       const saleId = si[0].sale_id;
-      const productId = await getDefaultProductId(client);
       for (const it of body.items) {
+        const productId = await getProductIdForSize(it.size_mm, client);
         const { rows: sir } = await client.query(
           `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
           [saleId, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],
@@ -163,10 +164,10 @@ salesRouter.post(
          creditDays, req.user!.user_id],
       );
       const saleId = sr[0].sale_id;
-      const productId = await getDefaultProductId(client);
 
       const allLines: { sale_item_id: number; allocations: AllocationResult[] }[] = [];
       for (const it of body.items) {
+        const productId = await getProductIdForSize(it.size_mm, client);
         const { rows: sir } = await client.query(
           `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
           [saleId, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],

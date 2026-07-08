@@ -31,33 +31,50 @@ dashboardsRouter.get(
 dashboardsRouter.get(
   '/opening-stock',
   asyncHandler(async (_req, res) => {
+    // Always report the full standard size range so every factory shows an 8→32 mm
+    // breakup (0 where nothing is booked/sold for that size).
     const { rows } = await query(`
-      SELECT f.factory_id, f.name AS factory_name, p.size_mm,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status IN ('Booked','Available')),0)  AS balance_booking,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status = 'Under-Loading'),0)            AS under_loading,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status IN ('Booked','Under-Loading','Available')),0) AS balance
+      WITH sizes(size_mm) AS (VALUES (8),(10),(12),(16),(20),(25),(32))
+      SELECT f.factory_id, f.name AS factory_name, sz.size_mm,
+             COALESCE(SUM(bi.booked_qty),0)  AS booked_qty,
+             COALESCE(sl.sold_qty,0)         AS sold_qty,
+             COALESCE(sl.under_loading_qty,0) AS under_loading_qty,
+             COALESCE(SUM(bi.balance_qty),0) AS balance_qty
         FROM factories f
-        CROSS JOIN products p
+        CROSS JOIN sizes sz
+        LEFT JOIN products p ON p.size_mm = sz.size_mm
         LEFT JOIN booking_items bi ON bi.factory_id = f.factory_id AND bi.product_id = p.product_id
-       GROUP BY f.factory_id, f.name, p.size_mm
-       ORDER BY f.factory_id, p.size_mm`);
+        LEFT JOIN (
+          SELECT si.factory_id, pr.size_mm,
+                 SUM(si.sale_qty) AS sold_qty,
+                 SUM(si.sale_qty) FILTER (WHERE EXISTS (SELECT 1 FROM dispatch_details dd WHERE dd.sale_id = s.sale_id)) AS under_loading_qty
+            FROM sale_items si
+            JOIN sales s ON s.sale_id = si.sale_id
+            JOIN products pr ON pr.product_id = si.product_id
+           WHERE s.status <> 'Cancelled'
+           GROUP BY si.factory_id, pr.size_mm
+        ) sl ON sl.factory_id = f.factory_id AND sl.size_mm = sz.size_mm
+       GROUP BY f.factory_id, f.name, sz.size_mm, sl.sold_qty, sl.under_loading_qty
+       ORDER BY f.factory_id, sz.size_mm`);
 
     const byFactory = new Map<number, any>();
     for (const r of rows) {
       if (!byFactory.has(r.factory_id))
-        byFactory.set(r.factory_id, { factory_id: r.factory_id, factory_name: r.factory_name, balance_booking: 0, under_loading: 0, balance: 0, sizes: [] });
+        byFactory.set(r.factory_id, { factory_id: r.factory_id, factory_name: r.factory_name, booked_qty: 0, sold_qty: 0, under_loading_qty: 0, balance_qty: 0, sizes: [] });
       const g = byFactory.get(r.factory_id);
-      g.balance_booking += Number(r.balance_booking);
-      g.under_loading += Number(r.under_loading);
-      g.balance += Number(r.balance);
-      if (Number(r.balance) > 0) g.sizes.push({ size_mm: r.size_mm, balance_booking: Number(r.balance_booking), under_loading: Number(r.under_loading), balance: Number(r.balance) });
+      g.booked_qty += Number(r.booked_qty);
+      g.sold_qty += Number(r.sold_qty);
+      g.under_loading_qty += Number(r.under_loading_qty);
+      g.balance_qty += Number(r.balance_qty);
+      g.sizes.push({ size_mm: r.size_mm, booked_qty: Number(r.booked_qty), sold_qty: Number(r.sold_qty), under_loading_qty: Number(r.under_loading_qty), balance_qty: Number(r.balance_qty) });
     }
     const factories = [...byFactory.values()];
     const totals = factories.reduce((t, f) => ({
-      balance_booking: t.balance_booking + f.balance_booking,
-      under_loading: t.under_loading + f.under_loading,
-      balance: t.balance + f.balance,
-    }), { balance_booking: 0, under_loading: 0, balance: 0 });
+      booked_qty: t.booked_qty + f.booked_qty,
+      sold_qty: t.sold_qty + f.sold_qty,
+      under_loading_qty: t.under_loading_qty + f.under_loading_qty,
+      balance_qty: t.balance_qty + f.balance_qty,
+    }), { booked_qty: 0, sold_qty: 0, under_loading_qty: 0, balance_qty: 0 });
     res.json({ factories, totals });
   }),
 );
@@ -248,12 +265,28 @@ dashboardsRouter.get(
   asyncHandler(async (_req, res) => {
     const pipeline = await query(`
       SELECT f.factory_id, f.name AS factory_name,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status='Available'),0) AS available_qty,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status='Under-Loading'),0) AS under_loading_qty,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status IN ('Booked','Under-Loading','Available')),0) AS balance_qty,
-             COALESCE(SUM(bi.balance_qty*bi.purchase_rate) FILTER (WHERE bi.status IN ('Available','Under-Loading')),0) AS pipeline_value
-        FROM factories f LEFT JOIN booking_items bi ON bi.factory_id=f.factory_id
-       GROUP BY f.factory_id, f.name ORDER BY balance_qty DESC, f.factory_id`);
+             COALESCE(bk.booked_qty,0)       AS booked_qty,
+             COALESCE(sl.sold_qty,0)         AS sold_qty,
+             COALESCE(sl.under_loading_qty,0) AS under_loading_qty,
+             COALESCE(bk.balance_qty,0)      AS balance_qty,
+             COALESCE(bk.pipeline_value,0)   AS pipeline_value
+        FROM factories f
+        LEFT JOIN (
+          SELECT factory_id,
+                 SUM(booked_qty)  AS booked_qty,
+                 SUM(balance_qty) AS balance_qty,
+                 SUM(balance_qty*purchase_rate) FILTER (WHERE status IN ('Available','Under-Loading')) AS pipeline_value
+            FROM booking_items GROUP BY factory_id
+        ) bk ON bk.factory_id = f.factory_id
+        LEFT JOIN (
+          SELECT si.factory_id,
+                 SUM(si.sale_qty) AS sold_qty,
+                 SUM(si.sale_qty) FILTER (WHERE EXISTS (SELECT 1 FROM dispatch_details dd WHERE dd.sale_id = s.sale_id)) AS under_loading_qty
+            FROM sale_items si JOIN sales s ON s.sale_id = si.sale_id
+           WHERE s.status <> 'Cancelled'
+           GROUP BY si.factory_id
+        ) sl ON sl.factory_id = f.factory_id
+       ORDER BY COALESCE(bk.balance_qty,0) DESC, f.factory_id`);
     const totals = await query(`
       SELECT
         (SELECT COALESCE(SUM(balance_due),0) FROM sales WHERE status<>'Cancelled') AS receivables,

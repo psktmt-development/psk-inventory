@@ -6,7 +6,7 @@ import { PageTitle, Loading } from '../../components/Page';
 import { inr, inrShort, compactINR, mt, PALETTE } from '../../api';
 
 interface Exec {
-  pipeline: { factory_id: number; factory_name: string; available_qty: number; under_loading_qty: number; balance_qty: number; pipeline_value: number }[];
+  pipeline: { factory_id: number; factory_name: string; booked_qty: number; sold_qty: number; under_loading_qty: number; balance_qty: number; pipeline_value: number }[];
   totals: { receivables: number; payables: number; pipeline_value: number; total_sales: number };
 }
 
@@ -61,9 +61,10 @@ export default function Executive() {
               <Table rowKey="factory_id" pagination={false} dataSource={data.pipeline} size="middle"
                 columns={[
                   { title: 'Factory', dataIndex: 'factory_name', render: (v, r) => <Link to={`/ledger?factory=${r.factory_id}`}>{v}</Link> },
-                  { title: 'Available', dataIndex: 'available_qty', align: 'right', render: mt },
+                  { title: 'Booking', dataIndex: 'booked_qty', align: 'right', render: mt },
+                  { title: 'Order', dataIndex: 'sold_qty', align: 'right', render: mt },
                   { title: 'Under-Loading', dataIndex: 'under_loading_qty', align: 'right', render: mt },
-                  { title: 'Balance Qty', dataIndex: 'balance_qty', align: 'right', render: (v) => <b style={{ color: v > 0 ? '#16a34a' : '#999' }}>{mt(v)}</b> },
+                  { title: 'Balance', dataIndex: 'balance_qty', align: 'right', render: (v) => <b style={{ color: v > 0 ? '#16a34a' : '#999' }}>{mt(v)}</b> },
                 ]} />
             </Card>
           </>

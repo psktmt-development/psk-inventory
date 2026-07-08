@@ -7,6 +7,7 @@ import {
   TeamOutlined, LineChartOutlined, InboxOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { useAuth, type Role } from '../auth';
+import logo from '../assets/logo.png';
 
 const { Sider, Header, Content } = Layout;
 
@@ -55,9 +56,10 @@ export default function AppLayout() {
     <Layout style={{ minHeight: '100vh' }}>
       <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} theme="light" width={230}
         style={{ borderRight: '1px solid #f0f0f0', overflow: 'auto', height: '100vh', position: 'sticky', top: 0 }}>
-        <div style={{ padding: collapsed ? 12 : 20, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <DatabaseOutlined style={{ fontSize: 22, color: '#2563eb' }} />
-          {!collapsed && <Typography.Title level={4} style={{ margin: 0 }}>PSK <span style={{ fontWeight: 400, fontSize: 13, color: '#888' }}>TMT</span></Typography.Title>}
+        <div style={{ padding: collapsed ? 12 : 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {collapsed
+            ? <DatabaseOutlined style={{ fontSize: 22, color: '#2563eb' }} />
+            : <img src={logo} alt="PSK TMT" style={{ maxWidth: '100%', maxHeight: 72, objectFit: 'contain' }} />}
         </div>
         <Menu mode="inline" selectedKeys={[loc.pathname]} items={items} style={{ borderInlineEnd: 0 }} />
       </Sider>

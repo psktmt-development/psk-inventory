@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { App, Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { api, apiError, inr } from '../../api';
+import { api, apiError, fmtDate, inr } from '../../api';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 import { useAuth } from '../../auth';
@@ -47,7 +47,7 @@ export default function SupplierPayment() {
         <Card>
           <Table rowKey="payment_id" dataSource={list.data ?? []} size="middle"
             columns={[
-              { title: 'Date', dataIndex: 'payment_date', render: (d) => d?.slice(0, 10) },
+              { title: 'Date', dataIndex: 'payment_date', render: fmtDate },
               { title: 'Factory', dataIndex: 'factory_name' },
               { title: 'Booking', dataIndex: 'booking_id', render: (v) => v ? `#${v}` : <Tag>General</Tag> },
               { title: 'Amount', dataIndex: 'amount', align: 'right', render: inr },
@@ -71,7 +71,7 @@ export default function SupplierPayment() {
               disabled={!factoryId} loading={pending.loading}
               options={(pending.data ?? []).map((b) => ({
                 value: b.booking_id,
-                label: `#${b.booking_id}${b.brand ? ` · ${b.brand}` : ''} · ${b.booking_date?.slice(0, 10)} · ${inr(b.outstanding)} due`,
+                label: `#${b.booking_id}${b.brand ? ` · ${b.brand}` : ''} · ${fmtDate(b.booking_date)} · ${inr(b.outstanding)} due`,
               }))} />
           </Form.Item>
           <Form.Item name="amount" label="Amount" rules={[{ required: true }]}

@@ -22,3 +22,25 @@ export async function getDefaultProductId(client?: PoolClient): Promise<number> 
   cachedId = id;
   return id;
 }
+
+// The standard TMT bar sizes (mm) selectable across the app.
+export const STANDARD_SIZES = [8, 10, 12, 16, 20, 25, 32] as const;
+
+/**
+ * Resolve the product_id for a given bar size, creating the product row on first
+ * use. `size_mm` is UNIQUE, so ON CONFLICT makes this a safe get-or-create.
+ */
+export async function getProductIdForSize(size: number, client?: PoolClient): Promise<number> {
+  if (!STANDARD_SIZES.includes(size as (typeof STANDARD_SIZES)[number]))
+    throw new Error(`Unsupported size ${size} mm`);
+  const run = client
+    ? (t: string, p: unknown[]) => client.query(t, p)
+    : (t: string, p: unknown[]) => query(t, p);
+  const { rows } = await run(
+    `INSERT INTO products (size_mm, unit) VALUES ($1, 'MT')
+       ON CONFLICT (size_mm) DO UPDATE SET size_mm = EXCLUDED.size_mm
+     RETURNING product_id`,
+    [size],
+  );
+  return rows[0].product_id as number;
+}

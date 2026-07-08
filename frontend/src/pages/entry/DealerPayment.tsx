@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Alert, App, Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { api, apiError, inr } from '../../api';
+import { api, apiError, fmtDate, inr } from '../../api';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 import { useAuth } from '../../auth';
@@ -42,7 +42,7 @@ export default function DealerPayment() {
         <Card>
           <Table rowKey="payment_id" dataSource={list.data ?? []} size="middle"
             columns={[
-              { title: 'Date', dataIndex: 'payment_date', render: (d) => d?.slice(0, 10) },
+              { title: 'Date', dataIndex: 'payment_date', render: fmtDate },
               { title: 'Dealer', dataIndex: 'dealer_name' },
               { title: 'Sale Inv', dataIndex: 'sale_invoice_no', render: (v, r) => v ?? `#${r.sale_id}` },
               { title: 'Amount', dataIndex: 'amount', align: 'right', render: inr },

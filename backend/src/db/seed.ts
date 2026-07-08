@@ -58,7 +58,10 @@ async function main() {
     }
 
     // Dealers (fixed area → sales-person mapping)
-    const dealers = fromCsvOrDefault('dealers', [
+    const dealers = fromCsvOrDefault<{
+      name: string; contact_person?: string; phone?: string; address?: string;
+      area?: string; sales_person_id?: number | string;
+    }>('dealers', [
       { name: 'Sri Ganesh Traders', contact_person: 'Ganesh', phone: '9111100001', area: 'North Zone', sales_person_id: 1 },
       { name: 'Maruti Steels', contact_person: 'Mahesh', phone: '9111100002', area: 'North Zone', sales_person_id: 1 },
       { name: 'Lakshmi Iron', contact_person: 'Lakshmi', phone: '9111100003', area: 'South Zone', sales_person_id: 2 },

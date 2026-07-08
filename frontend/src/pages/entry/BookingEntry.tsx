@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { App, Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { api, apiError, inr, mt } from '../../api';
+import { api, apiError, fmtDate, inr, mt } from '../../api';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 import { useAuth } from '../../auth';
+
+const SIZES = [8, 10, 12, 16, 20, 25, 32];
 
 export default function BookingEntry() {
   const { message } = App.useApp();
@@ -24,7 +26,7 @@ export default function BookingEntry() {
         booking_date: v.booking_date?.format('YYYY-MM-DD'),
         brand: v.brand,
         items: (v.items ?? []).map((it: any) => ({
-          booked_qty: it.booked_qty, purchase_rate: it.purchase_rate ?? 0,
+          size_mm: it.size_mm, booked_qty: it.booked_qty, purchase_rate: it.purchase_rate ?? 0,
         })),
       });
       message.success('Booking created');
@@ -47,11 +49,14 @@ export default function BookingEntry() {
             onRow={(r) => ({ onClick: () => openDetail(r.booking_id), style: { cursor: 'pointer' } })}
             columns={[
               { title: '#', dataIndex: 'booking_id', width: 60 },
-              { title: 'Date', dataIndex: 'booking_date', render: (d) => d?.slice(0, 10) },
+              { title: 'Date', dataIndex: 'booking_date', render: fmtDate },
               { title: 'Factory', dataIndex: 'factory_name' },
               { title: 'Rate', dataIndex: 'avg_rate', align: 'right', render: inr },
               { title: 'Total Booked', dataIndex: 'total_booked', align: 'right', render: mt },
               { title: 'Balance', dataIndex: 'total_balance', align: 'right', render: mt },
+              { title: 'Payable', dataIndex: 'payable', align: 'right', render: inr },
+              { title: 'Paid', dataIndex: 'paid', align: 'right', render: (v) => <span style={{ color: '#16a34a' }}>{inr(v)}</span> },
+              { title: 'Due', align: 'right', render: (_, r: any) => { const due = Number(r.payable) - Number(r.paid); return <b style={{ color: due > 0 ? '#dc2626' : '#16a34a' }}>{inr(due)}</b>; } },
             ]} />
         </Card>
       </Loading>
@@ -75,6 +80,7 @@ export default function BookingEntry() {
               <>
                 <Table dataSource={fields} pagination={false} size="small" rowKey="key"
                   columns={[
+                    { title: 'Size', render: (_, f: any) => <Form.Item name={[f.name, 'size_mm']} rules={[{ required: true, message: 'Size' }]} noStyle><Select placeholder="Size" style={{ width: 110 }} options={SIZES.map((s) => ({ value: s, label: `${s} mm` }))} /></Form.Item> },
                     { title: 'Qty (MT)', render: (_, f: any) => <Form.Item name={[f.name, 'booked_qty']} rules={[{ required: true }]} noStyle><InputNumber min={0.001} style={{ width: 100 }} /></Form.Item> },
                     { title: 'Rate', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_rate']} noStyle><InputNumber min={0} style={{ width: 110 }} /></Form.Item> },
                     { title: '', render: (_, f: any) => fields.length > 1 && <DeleteOutlined onClick={() => remove(f.name)} style={{ color: '#dc2626' }} /> },
@@ -90,6 +96,7 @@ export default function BookingEntry() {
       <Modal title={`Booking #${detail?.booking_id} — ${detail?.factory_name}`} open={!!detail} onCancel={() => setDetail(null)} footer={null} width={640}>
         <Table rowKey="booking_item_id" dataSource={detail?.items ?? []} pagination={false} size="small"
           columns={[
+            { title: 'Size', dataIndex: 'size_mm', render: (v) => `${v} mm` },
             { title: 'Booked', dataIndex: 'booked_qty', align: 'right', render: mt },
             { title: 'Balance (available)', dataIndex: 'balance_qty', align: 'right', render: mt },
           ]} />
