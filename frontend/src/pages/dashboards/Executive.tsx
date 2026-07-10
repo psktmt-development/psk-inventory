@@ -46,7 +46,7 @@ export default function Executive() {
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie data={[{ name: 'Receivables', value: data.totals.receivables }, { name: 'Payables', value: data.totals.payables }]}
-                        dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} label>
+                        dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} label={(e: any) => inr(e.value)}>
                         <Cell fill="#f59e0b" /><Cell fill="#dc2626" />
                       </Pie>
                       <Tooltip formatter={(v: number) => inr(v)} />

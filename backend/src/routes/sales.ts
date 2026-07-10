@@ -207,3 +207,22 @@ salesRouter.patch(
     res.json(sale);
   }),
 );
+
+// Delete a sale (to correct a mis-entry). Releases its FIFO-allocated stock back
+// to Available and removes its items, dispatch and dealer payments.
+salesRouter.delete(
+  '/:id',
+  saleWrite,
+  asyncHandler(async (req, res) => {
+    await withTransaction(async (client) => {
+      const { rows } = await client.query(`SELECT sale_id FROM sales WHERE sale_id=$1 FOR UPDATE`, [req.params.id]);
+      if (!rows[0]) throw new HttpError(404, 'Sale not found');
+      // dealer_payments has no ON DELETE CASCADE — remove them first.
+      await client.query(`DELETE FROM dealer_payments WHERE sale_id=$1`, [req.params.id]);
+      // Deleting the sale cascades to sale_items → sale_allocations (the alloc trigger
+      // restores booking balance & reopens Closed lots) and dispatch_details.
+      await client.query(`DELETE FROM sales WHERE sale_id=$1`, [req.params.id]);
+    });
+    res.json({ ok: true });
+  }),
+);

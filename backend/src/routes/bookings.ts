@@ -100,3 +100,31 @@ bookingsRouter.post(
     res.status(201).json(result);
   }),
 );
+
+// Delete a booking (to correct a mis-entry). Blocked once any of its stock has
+// been sold, since that would orphan the sale's FIFO allocations.
+bookingsRouter.delete(
+  '/:id',
+  bookingWrite,
+  asyncHandler(async (req, res) => {
+    await withTransaction(async (client) => {
+      const { rows } = await client.query(`SELECT booking_id FROM bookings WHERE booking_id=$1 FOR UPDATE`, [req.params.id]);
+      if (!rows[0]) throw new HttpError(404, 'Booking not found');
+      const { rows: sold } = await client.query(
+        `SELECT COALESCE(SUM(a.allocated_qty),0) AS qty
+           FROM sale_allocations a
+           JOIN booking_items bi ON bi.booking_item_id = a.booking_item_id
+          WHERE bi.booking_id = $1`,
+        [req.params.id],
+      );
+      if (Number(sold[0].qty) > 0) {
+        throw new HttpError(409, 'Cannot delete: stock from this booking has already been sold. Delete the related sale(s) first.');
+      }
+      // supplier_payments has no ON DELETE CASCADE — clear them first.
+      await client.query(`DELETE FROM supplier_payments WHERE booking_id=$1`, [req.params.id]);
+      // booking_items cascade-delete with the booking.
+      await client.query(`DELETE FROM bookings WHERE booking_id=$1`, [req.params.id]);
+    });
+    res.json({ ok: true });
+  }),
+);

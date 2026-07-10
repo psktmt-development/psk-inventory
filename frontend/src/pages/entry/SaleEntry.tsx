@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, App, Button, Card, DatePicker, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, DatePicker, Descriptions, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { PlusOutlined, DeleteOutlined, TruckOutlined, CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiError, fmtDate, inr, mt, STATUS_COLORS } from '../../api';
@@ -96,6 +96,14 @@ export default function SaleEntry() {
 
   const openDetail = async (id: number) => { setAddingDispatch(false); setDetail((await api.get(`/sales/${id}`)).data); };
 
+  const del = async (id: number) => {
+    try {
+      await api.delete(`/sales/${id}`);
+      message.success('Sale deleted, stock released');
+      setDetail(null); list.reload();
+    } catch (e) { message.error(apiError(e)); }
+  };
+
   const addDispatchLater = async (v: any) => {
     try {
       await api.post('/dispatch', {
@@ -131,6 +139,14 @@ export default function SaleEntry() {
               { title: 'Due', dataIndex: 'balance_due', align: 'right', render: (v) => <span style={{ color: v > 0 ? '#dc2626' : '#16a34a' }}>{inr(v)}</span> },
               { title: 'Status', dataIndex: 'status', render: (s) => <Tag color={STATUS_COLORS[s]}>{s}</Tag> },
               { title: 'Payment', dataIndex: 'payment_stat', render: (s) => <Tag color={STATUS_COLORS[s]}>{s}</Tag> },
+              ...(canWrite ? [{
+                title: '', width: 56, align: 'center' as const, fixed: 'right' as const, render: (_: any, r: any) => (
+                  <Popconfirm title="Delete this sale?" description="Permanently removes the sale and returns its stock to Available."
+                    okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => del(r.sale_id)}>
+                    <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                  </Popconfirm>
+                ),
+              }] : []),
             ]} />
         </Card>
       </Loading>
@@ -215,8 +231,15 @@ export default function SaleEntry() {
 
       {/* Sale detail */}
       <Modal title={`Sale ${detail?.sale_invoice_no ?? '#' + detail?.sale_id}`} open={!!detail} onCancel={() => setDetail(null)} width={840}
-        footer={detail && detail.status !== 'Cancelled' && detail.status !== 'Delivered' && canWrite ?
-          [<Button key="c" danger onClick={async () => { try { await api.patch(`/sales/${detail.sale_id}/cancel`); message.success('Sale cancelled, stock released'); setDetail(null); list.reload(); } catch (e) { message.error(apiError(e)); } }}>Cancel sale</Button>] : null}>
+        footer={detail && canWrite ? [
+          detail.status !== 'Cancelled' && detail.status !== 'Delivered' ? (
+            <Button key="c" onClick={async () => { try { await api.patch(`/sales/${detail.sale_id}/cancel`); message.success('Sale cancelled, stock released'); setDetail(null); list.reload(); } catch (e) { message.error(apiError(e)); } }}>Cancel sale</Button>
+          ) : null,
+          <Popconfirm key="d" title="Delete this sale?" description="Permanently removes the sale and returns its stock to Available."
+            okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => del(detail.sale_id)}>
+            <Button danger icon={<DeleteOutlined />}>Delete sale</Button>
+          </Popconfirm>,
+        ] : null}>
         {detail && (
           <>
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 12 }}>

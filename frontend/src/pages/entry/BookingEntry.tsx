@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { App, Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table } from 'antd';
+import { App, Button, Card, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiError, fmtDate, inr, mt } from '../../api';
@@ -39,6 +39,14 @@ export default function BookingEntry() {
     setDetail(data);
   };
 
+  const del = async (id: number) => {
+    try {
+      await api.delete(`/bookings/${id}`);
+      message.success('Booking deleted');
+      list.reload();
+    } catch (e) { message.error(apiError(e)); }
+  };
+
   return (
     <>
       <PageTitle title="Bookings" subtitle="Book stock from a factory — booked stock is instantly available for sale (FIFO by date)"
@@ -57,6 +65,14 @@ export default function BookingEntry() {
               { title: 'Payable', dataIndex: 'payable', align: 'right', render: inr },
               { title: 'Paid', dataIndex: 'paid', align: 'right', render: (v) => <span style={{ color: '#16a34a' }}>{inr(v)}</span> },
               { title: 'Due', align: 'right', render: (_, r: any) => { const due = Number(r.payable) - Number(r.paid); return <b style={{ color: due > 0 ? '#dc2626' : '#16a34a' }}>{inr(due)}</b>; } },
+              ...(canWrite ? [{
+                title: '', width: 56, align: 'center' as const, render: (_: any, r: any) => (
+                  <Popconfirm title="Delete this booking?" description="Removes the booking and its lots. Not allowed if any stock was already sold."
+                    okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => del(r.booking_id)}>
+                    <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                  </Popconfirm>
+                ),
+              }] : []),
             ]} />
         </Card>
       </Loading>
