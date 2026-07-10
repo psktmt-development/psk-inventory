@@ -53,9 +53,10 @@ export const compactINR = (n: number | string | null | undefined) => {
 export const num = (n: number | string | null | undefined, dp = 2) =>
   n == null ? '—' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
-// Quantity in MT with Indian grouping, up to 2 decimals, e.g. 1,63,080.08 MT.
+// Quantity in MT with Indian grouping. Always show at least 2 decimals so trailing
+// zeros are preserved (19.2 → 19.20, 19 → 19.00), up to 3 (19.205 stays exact).
 export const mt = (n: number | string | null | undefined) =>
-  n == null ? '—' : `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })} MT`;
+  n == null ? '—' : `${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} MT`;
 
 // Format a date as DD-MM-YYYY. Accepts a 'YYYY-MM-DD' string (or ISO/Date) and
 // reads the calendar parts directly to avoid any timezone shifting.
