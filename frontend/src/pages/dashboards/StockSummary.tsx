@@ -3,7 +3,7 @@ import { Card, Table, Typography } from 'antd';
 import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 
-interface Size { size_mm: number; booked_qty: number; sold_qty: number; under_loading_qty: number; balance_qty: number; }
+interface Size { size_mm: number | null; sold_qty: number; under_loading_qty: number; }
 interface Factory { factory_id: number; factory_name: string; booked_qty: number; sold_qty: number; under_loading_qty: number; balance_qty: number; sizes: Size[]; }
 interface OpeningStock { factories: Factory[]; totals: { booked_qty: number; sold_qty: number; under_loading_qty: number; balance_qty: number }; }
 
@@ -19,28 +19,27 @@ export default function StockSummary() {
     <span style={{ fontWeight: opts.bold ? 600 : 400, color: v ? opts.color : '#bbb' }}>{num(v)}</span>
   );
 
-  // Nested table showing the 8/10/12/16/20/25/32 mm breakup for one factory
+  // Nested table: size-wise breakup of what has been SOLD for one factory.
+  // (Stock/booking is sizeless now, so only the sold side has a size breakdown.)
   const sizeBreakup = (f: Factory) => (
     <Table<Size>
-      rowKey="size_mm"
+      rowKey={(s) => String(s.size_mm ?? 'na')}
       dataSource={f.sizes}
       pagination={false}
       size="small"
       style={{ margin: '0 8px' }}
-      locale={{ emptyText: 'No stock for this factory' }}
+      locale={{ emptyText: 'No sales for this factory yet' }}
       columns={[
-        { title: 'Size', dataIndex: 'size_mm', render: (v) => <span>{v} mm</span> },
-        { title: 'Booking', dataIndex: 'booked_qty', align: 'right', width: 170, render: (v) => cell(v) },
-        { title: 'Order', dataIndex: 'sold_qty', align: 'right', width: 160, render: (v) => cell(v, { color: '#2563eb' }) },
-        { title: 'Under Loading', dataIndex: 'under_loading_qty', align: 'right', width: 160, render: (v) => cell(v, { color: '#f59e0b' }) },
-        { title: 'Balance', dataIndex: 'balance_qty', align: 'right', width: 150, render: (v) => cell(v, { color: '#16a34a', bold: true }) },
+        { title: 'Size', dataIndex: 'size_mm', render: (v) => <span>{v ? `${v} mm` : '—'}</span> },
+        { title: 'Order (sold)', dataIndex: 'sold_qty', align: 'right', width: 200, render: (v) => cell(v, { color: '#2563eb' }) },
+        { title: 'Under Loading', dataIndex: 'under_loading_qty', align: 'right', width: 200, render: (v) => cell(v, { color: '#f59e0b' }) },
       ]}
     />
   );
 
   return (
     <>
-      <PageTitle title="Stock Summary" subtitle="Booking · Order · Under Loading · Balance — per factory (click a factory for the size-wise breakup)" />
+      <PageTitle title="Stock Summary" subtitle="Booking · Order · Under Loading · Balance — per factory (click a factory for the size-wise sold breakup)" />
       <Loading loading={loading} error={error}>
         <Card styles={{ body: { padding: 0 } }}>
           <Table<Factory>

@@ -7,8 +7,6 @@ import { useFetch } from '../../hooks';
 import { PageTitle, Loading } from '../../components/Page';
 import { useAuth } from '../../auth';
 
-const SIZES = [8, 10, 12, 16, 20, 25, 32];
-
 export default function BookingEntry() {
   const { message } = App.useApp();
   const { can } = useAuth();
@@ -26,7 +24,7 @@ export default function BookingEntry() {
       booking_date: v.booking_date?.format('YYYY-MM-DD'),
       brand: v.brand,
       items: (v.items ?? []).map((it: any) => ({
-        size_mm: it.size_mm, booked_qty: it.booked_qty, purchase_rate: it.purchase_rate ?? 0,
+        booked_qty: it.booked_qty, purchase_rate: it.purchase_rate ?? 0,
       })),
     };
     try {
@@ -50,7 +48,7 @@ export default function BookingEntry() {
         factory_id: data.factory_id,
         booking_date: data.booking_date ? dayjs(data.booking_date) : dayjs(),
         brand: data.brand,
-        items: (data.items ?? []).map((it: any) => ({ size_mm: it.size_mm, booked_qty: Number(it.booked_qty), purchase_rate: Number(it.purchase_rate) })),
+        items: (data.items ?? []).map((it: any) => ({ booked_qty: Number(it.booked_qty), purchase_rate: Number(it.purchase_rate) })),
       });
       setEditId(id); setOpen(true);
     } catch (e) { message.error(apiError(e)); }
@@ -123,9 +121,8 @@ export default function BookingEntry() {
               <>
                 <Table dataSource={fields} pagination={false} size="small" rowKey="key"
                   columns={[
-                    { title: 'Size', render: (_, f: any) => <Form.Item name={[f.name, 'size_mm']} rules={[{ required: true, message: 'Size' }]} noStyle><Select placeholder="Size" style={{ width: 110 }} options={SIZES.map((s) => ({ value: s, label: `${s} mm` }))} /></Form.Item> },
-                    { title: 'Qty (MT)', render: (_, f: any) => <Form.Item name={[f.name, 'booked_qty']} rules={[{ required: true }]} noStyle><InputNumber min={0.001} style={{ width: 100 }} /></Form.Item> },
-                    { title: 'Rate', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_rate']} noStyle><InputNumber min={0} style={{ width: 110 }} /></Form.Item> },
+                    { title: 'Qty (MT)', render: (_, f: any) => <Form.Item name={[f.name, 'booked_qty']} rules={[{ required: true }]} noStyle><InputNumber min={0.001} style={{ width: 140 }} placeholder="tonnes" /></Form.Item> },
+                    { title: 'Rate / MT', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_rate']} noStyle><InputNumber min={0} style={{ width: 160 }} placeholder="optional" /></Form.Item> },
                     { title: '', render: (_, f: any) => fields.length > 1 && <DeleteOutlined onClick={() => remove(f.name)} style={{ color: '#dc2626' }} /> },
                   ]} />
                 <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})} block style={{ marginTop: 10 }}>Add line</Button>

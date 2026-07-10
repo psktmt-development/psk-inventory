@@ -139,8 +139,10 @@ CREATE TABLE IF NOT EXISTS sale_items (
   sale_id       INTEGER NOT NULL REFERENCES sales(sale_id) ON DELETE CASCADE,
   factory_id    INTEGER NOT NULL REFERENCES factories(factory_id),
   product_id    INTEGER NOT NULL REFERENCES products(product_id),
+  size_mm       INTEGER,             -- size label: stock is sizeless, sales are recorded size-wise
   sale_qty      NUMERIC(14,3) NOT NULL CHECK (sale_qty > 0),
-  sale_rate     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  sale_rate     NUMERIC(14,2),       -- optional sale price; filled/adjusted later
+  purchase_rate NUMERIC(14,2),       -- optional actual size-wise purchase cost; filled/adjusted later
   purchase_invoice_no VARCHAR(60),  -- brand's purchase invoice: we buy from the factory when the sale order comes
   line_total    NUMERIC(14,2) GENERATED ALWAYS AS (sale_qty * sale_rate) STORED
 );

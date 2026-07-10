@@ -3,13 +3,15 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/pool.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { getProductIdForSize } from '../services/product.js';
+import { getDefaultProductId } from '../services/product.js';
 
 export const bookingsRouter = Router();
 bookingsRouter.use(requireAuth);
 
 const bookingWrite = requireRole('Warehouse', 'Accounts');
 
+// Bookings are sizeless: you book a lump tonnage at a (provisional) rate.
+// Purchase rate is optional and defaults to 0 until finalised.
 const createSchema = z.object({
   factory_id: z.number().int(),
   booking_date: z.string().optional(),
@@ -17,7 +19,6 @@ const createSchema = z.object({
   items: z
     .array(
       z.object({
-        size_mm: z.number().int(),
         booked_qty: z.number().positive(),
         purchase_rate: z.number().nonnegative().default(0),
       }),
@@ -78,7 +79,7 @@ bookingsRouter.post(
       const booking = b[0];
       const items = [];
       for (const it of body.items) {
-        const productId = await getProductIdForSize(it.size_mm, client);
+        const productId = await getDefaultProductId(client);
         // Booked stock is immediately Available for sale; received_date = booking date drives FIFO order.
         const { rows } = await client.query(
           `INSERT INTO booking_items
@@ -131,7 +132,7 @@ bookingsRouter.put(
       const booking = b[0];
       const items = [];
       for (const it of body.items) {
-        const productId = await getProductIdForSize(it.size_mm, client);
+        const productId = await getDefaultProductId(client);
         const { rows: bi } = await client.query(
           `INSERT INTO booking_items
              (booking_id, factory_id, product_id, booked_qty, purchase_rate, status, received_date)

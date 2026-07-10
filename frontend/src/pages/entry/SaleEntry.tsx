@@ -29,28 +29,24 @@ export default function SaleEntry() {
 
   const dealer = useMemo(() => (dealers.data ?? []).find((d) => d.dealer_id === dealerId), [dealers.data, dealerId]);
 
-  // Live available-stock check per sale line (Available lots only, same factory + size).
+  // Live available-stock check per sale line. Stock is sizeless: one pool per
+  // factory, so availability is checked per factory (size is just a label).
   const items = Form.useWatch('items', form) as any[] | undefined;
-  const key = (factoryId: number, size: number) => `${factoryId}:${size}`;
   const stockMap = useMemo(() => {
-    const m = new Map<string, number>();
-    (stock.data ?? []).forEach((r) => m.set(key(r.factory_id, r.size_mm), (m.get(key(r.factory_id, r.size_mm)) ?? 0) + Number(r.available_qty)));
+    const m = new Map<number, number>();
+    (stock.data ?? []).forEach((r) => m.set(r.factory_id, (m.get(r.factory_id) ?? 0) + Number(r.available_qty)));
     return m;
   }, [stock.data]);
   const stockIssues = useMemo(() => {
-    // Aggregate demand per factory+size across ALL lines (two lines can hit the same lot pool).
-    const demand = new Map<string, number>();
+    // Aggregate demand per factory across ALL lines (every line hits the same factory pool).
+    const demand = new Map<number, number>();
     (items ?? []).forEach((l) => {
-      if (l?.factory_id && l?.size_mm && l?.sale_qty) {
-        const k = key(l.factory_id, l.size_mm);
-        demand.set(k, (demand.get(k) ?? 0) + Number(l.sale_qty));
-      }
+      if (l?.factory_id && l?.sale_qty) demand.set(l.factory_id, (demand.get(l.factory_id) ?? 0) + Number(l.sale_qty));
     });
     return (items ?? []).map((l) => {
-      if (!l?.factory_id || !l?.size_mm) return null;
-      const k = key(l.factory_id, l.size_mm);
-      const avail = stockMap.get(k) ?? 0;
-      const dem = demand.get(k) ?? 0;
+      if (!l?.factory_id) return null;
+      const avail = stockMap.get(l.factory_id) ?? 0;
+      const dem = demand.get(l.factory_id) ?? 0;
       return { avail, dem, exceeded: dem - avail > 1e-9 };
     });
   }, [items, stockMap]);
@@ -75,7 +71,9 @@ export default function SaleEntry() {
         credit_days: data.credit_days,
         items: (data.items ?? []).map((it: any) => ({
           factory_id: it.factory_id, size_mm: it.size_mm, sale_qty: Number(it.sale_qty),
-          sale_rate: Number(it.sale_rate), purchase_invoice_no: it.purchase_invoice_no,
+          sale_rate: it.sale_rate == null ? null : Number(it.sale_rate),
+          purchase_rate: it.purchase_rate == null ? null : Number(it.purchase_rate),
+          purchase_invoice_no: it.purchase_invoice_no,
         })),
       });
       setWithDispatch(false); setEditId(id); setDetail(null); setOpen(true);
@@ -90,7 +88,7 @@ export default function SaleEntry() {
       sale_invoice_no: v.sale_invoice_no,
       payment_type: v.payment_type,
       credit_days: v.payment_type === 'Credit' ? v.credit_days : null,
-      items: (v.items ?? []).map((it: any) => ({ factory_id: it.factory_id, size_mm: it.size_mm, sale_qty: it.sale_qty, sale_rate: it.sale_rate, purchase_invoice_no: it.purchase_invoice_no })),
+      items: (v.items ?? []).map((it: any) => ({ factory_id: it.factory_id, size_mm: it.size_mm ?? null, sale_qty: it.sale_qty, sale_rate: it.sale_rate ?? null, purchase_rate: it.purchase_rate ?? null, purchase_invoice_no: it.purchase_invoice_no })),
     };
   };
 
@@ -222,10 +220,11 @@ export default function SaleEntry() {
                 <Table dataSource={fields} pagination={false} size="small" rowKey="key"
                   columns={[
                     { title: 'Factory', render: (_, f: any) => <Form.Item name={[f.name, 'factory_id']} rules={[{ required: true }]} noStyle><Select showSearch optionFilterProp="label" style={{ width: 150 }} placeholder="Factory" options={(factories.data ?? []).map((x) => ({ value: x.factory_id, label: x.name }))} /></Form.Item> },
-                    { title: 'Size', render: (_, f: any) => <Form.Item name={[f.name, 'size_mm']} rules={[{ required: true, message: 'Size' }]} noStyle><Select style={{ width: 100 }} placeholder="Size" options={SIZES.map((s) => ({ value: s, label: `${s} mm` }))} /></Form.Item> },
+                    { title: 'Size', render: (_, f: any) => <Form.Item name={[f.name, 'size_mm']} noStyle><Select allowClear style={{ width: 100 }} placeholder="Size" options={SIZES.map((s) => ({ value: s, label: `${s} mm` }))} /></Form.Item> },
                     { title: 'Qty (MT)', render: (_, f: any) => <Form.Item name={[f.name, 'sale_qty']} rules={[{ required: true }]} noStyle><InputNumber min={0.001} style={{ width: 100 }} status={stockIssues[f.name]?.exceeded ? 'error' : undefined} /></Form.Item> },
-                    { title: 'Rate', render: (_, f: any) => <Form.Item name={[f.name, 'sale_rate']} rules={[{ required: true }]} noStyle><InputNumber min={0} style={{ width: 110 }} /></Form.Item> },
-                    { title: 'Purchase Inv', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_invoice_no']} noStyle><Input style={{ width: 130 }} placeholder="brand invoice" /></Form.Item> },
+                    { title: 'Sale Rate', render: (_, f: any) => <Form.Item name={[f.name, 'sale_rate']} noStyle><InputNumber min={0} style={{ width: 110 }} placeholder="optional" /></Form.Item> },
+                    { title: 'Pur. Cost', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_rate']} noStyle><InputNumber min={0} style={{ width: 110 }} placeholder="optional" /></Form.Item> },
+                    { title: 'Purchase Inv', render: (_, f: any) => <Form.Item name={[f.name, 'purchase_invoice_no']} noStyle><Input style={{ width: 120 }} placeholder="optional" /></Form.Item> },
                     {
                       title: 'In stock', width: 150, render: (_, f: any) => {
                         const s = stockIssues[f.name];
@@ -294,9 +293,10 @@ export default function SaleEntry() {
             <Table title={() => 'Line items'} rowKey="sale_item_id" dataSource={detail.items} pagination={false} size="small"
               columns={[
                 { title: 'Factory', dataIndex: 'factory_name' },
-                { title: 'Size', dataIndex: 'size_mm', render: (v) => `${v} mm` },
+                { title: 'Size', dataIndex: 'size_mm', render: (v) => (v ? `${v} mm` : '—') },
                 { title: 'Qty', dataIndex: 'sale_qty', align: 'right', render: mt },
-                { title: 'Rate', dataIndex: 'sale_rate', align: 'right', render: inr },
+                { title: 'Sale Rate', dataIndex: 'sale_rate', align: 'right', render: inr },
+                { title: 'Pur. Cost', dataIndex: 'purchase_rate', align: 'right', render: inr },
                 { title: 'Total', dataIndex: 'line_total', align: 'right', render: inr },
                 { title: 'Purchase Inv', dataIndex: 'purchase_invoice_no', render: (v) => v ?? '—' },
               ]} />

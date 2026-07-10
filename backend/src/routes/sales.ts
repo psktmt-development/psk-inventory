@@ -4,13 +4,15 @@ import { query, withTransaction } from '../db/pool.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { fifoAllocate, type AllocationResult } from '../services/allocation.js';
-import { getProductIdForSize } from '../services/product.js';
+import { getDefaultProductId } from '../services/product.js';
 
 export const salesRouter = Router();
 salesRouter.use(requireAuth);
 
 const saleWrite = requireRole('Sales', 'Accounts');
 
+// Sales are size-wise but draw from the factory's single sizeless pool. size_mm
+// is a label; sale_rate and purchase_rate are optional (filled/adjusted later).
 const saleSchema = z.object({
   dealer_id: z.number().int(),
   sale_date: z.string().optional(),
@@ -21,9 +23,10 @@ const saleSchema = z.object({
     .array(
       z.object({
         factory_id: z.number().int(),
-        size_mm: z.number().int(),
+        size_mm: z.number().int().optional().nullable(),
         sale_qty: z.number().positive(),
-        sale_rate: z.number().nonnegative(),
+        sale_rate: z.number().nonnegative().optional().nullable(),
+        purchase_rate: z.number().nonnegative().optional().nullable(),
         purchase_invoice_no: z.string().optional().nullable(),
       }),
     )
@@ -69,9 +72,8 @@ salesRouter.get(
     );
     if (!head[0]) throw new HttpError(404, 'Sale not found');
     const { rows: items } = await query(
-      `SELECT si.*, f.name AS factory_name, p.size_mm FROM sale_items si
+      `SELECT si.*, f.name AS factory_name FROM sale_items si
          JOIN factories f ON f.factory_id=si.factory_id
-         JOIN products p ON p.product_id=si.product_id
         WHERE si.sale_id=$1 ORDER BY si.sale_item_id`,
       [req.params.id],
     );
@@ -97,7 +99,7 @@ salesRouter.post(
   saleWrite,
   asyncHandler(async (req, res) => {
     const body = saleSchema.parse(req.body);
-    const total = body.items.reduce((s, i) => s + i.sale_qty * i.sale_rate, 0);
+    const total = body.items.reduce((s, i) => s + i.sale_qty * (i.sale_rate ?? 0), 0);
     const out = await withTransaction(async (client) => {
       const lines: any[] = [];
       let sufficient = true;
@@ -108,10 +110,10 @@ salesRouter.post(
       );
       const saleId = si[0].sale_id;
       for (const it of body.items) {
-        const productId = await getProductIdForSize(it.size_mm, client);
+        const productId = await getDefaultProductId(client);
         const { rows: sir } = await client.query(
-          `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
-          [saleId, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],
+          `INSERT INTO sale_items (sale_id, factory_id, product_id, size_mm, sale_qty, sale_rate, purchase_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING sale_item_id`,
+          [saleId, it.factory_id, productId, it.size_mm ?? null, it.sale_qty, it.sale_rate ?? null, it.purchase_rate ?? null, it.purchase_invoice_no ?? null],
         );
         try {
           const allocs = await fifoAllocate(client, sir[0].sale_item_id, it.factory_id, productId, it.sale_qty);
@@ -167,10 +169,10 @@ salesRouter.post(
 
       const allLines: { sale_item_id: number; allocations: AllocationResult[] }[] = [];
       for (const it of body.items) {
-        const productId = await getProductIdForSize(it.size_mm, client);
+        const productId = await getDefaultProductId(client);
         const { rows: sir } = await client.query(
-          `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
-          [saleId, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],
+          `INSERT INTO sale_items (sale_id, factory_id, product_id, size_mm, sale_qty, sale_rate, purchase_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING sale_item_id`,
+          [saleId, it.factory_id, productId, it.size_mm ?? null, it.sale_qty, it.sale_rate ?? null, it.purchase_rate ?? null, it.purchase_invoice_no ?? null],
         );
         const allocations = await fifoAllocate(client, sir[0].sale_item_id, it.factory_id, productId, it.sale_qty);
         allLines.push({ sale_item_id: sir[0].sale_item_id, allocations });
@@ -245,10 +247,10 @@ salesRouter.put(
       );
 
       for (const it of body.items) {
-        const productId = await getProductIdForSize(it.size_mm, client);
+        const productId = await getDefaultProductId(client);
         const { rows: sir } = await client.query(
-          `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
-          [req.params.id, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],
+          `INSERT INTO sale_items (sale_id, factory_id, product_id, size_mm, sale_qty, sale_rate, purchase_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING sale_item_id`,
+          [req.params.id, it.factory_id, productId, it.size_mm ?? null, it.sale_qty, it.sale_rate ?? null, it.purchase_rate ?? null, it.purchase_invoice_no ?? null],
         );
         await fifoAllocate(client, sir[0].sale_item_id, it.factory_id, productId, it.sale_qty);
       }

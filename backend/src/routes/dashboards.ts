@@ -6,69 +6,70 @@ import { requireAuth } from '../middleware/auth.js';
 export const dashboardsRouter = Router();
 dashboardsRouter.use(requireAuth);
 
-// 1. Opening Stock Summary — per factory (+size), the stock buckets
+// 1. Stock Summary — available stock per factory (stock is sizeless: one pool
+//    per factory). Feeds the sale form's per-factory availability check.
 dashboardsRouter.get(
   '/stock-summary',
   asyncHandler(async (_req, res) => {
     const { rows } = await query(`
-      SELECT f.factory_id, f.name AS factory_name, p.product_id, p.size_mm,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status='Booked'),0)        AS booked_qty,
-             COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status='Under-Loading'),0) AS under_loading_qty,
+      SELECT f.factory_id, f.name AS factory_name,
              COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status='Available'),0)      AS available_qty,
              COALESCE(SUM(bi.balance_qty) FILTER (WHERE bi.status IN ('Booked','Under-Loading','Available')),0) AS total_balance
         FROM factories f
-        CROSS JOIN products p
-        LEFT JOIN booking_items bi ON bi.factory_id=f.factory_id AND bi.product_id=p.product_id
-       GROUP BY f.factory_id, f.name, p.product_id, p.size_mm
+        LEFT JOIN booking_items bi ON bi.factory_id=f.factory_id
+       GROUP BY f.factory_id, f.name
       HAVING COALESCE(SUM(bi.balance_qty),0) > 0
-       ORDER BY f.name, p.size_mm`);
+       ORDER BY f.name`);
     res.json(rows);
   }),
 );
 
-// 1b. Opening Stock — mirrors the client's "Opening Stock" sheet: every factory (incl. zero),
-//     3 columns (Balance Booking / Under Loading / Balance), size breakdown, grand total.
+// 1b. Opening Stock — every factory (incl. zero): Booking / Order / Under Loading /
+//     Balance. Booking + Balance are sizeless (per factory); the size breakup is on
+//     the sold side only (from the sale line's size_mm label).
 dashboardsRouter.get(
   '/opening-stock',
   asyncHandler(async (_req, res) => {
-    // Always report the full standard size range so every factory shows an 8→32 mm
-    // breakup (0 where nothing is booked/sold for that size).
-    const { rows } = await query(`
-      WITH sizes(size_mm) AS (VALUES (8),(10),(12),(16),(20),(25),(32))
-      SELECT f.factory_id, f.name AS factory_name, sz.size_mm,
+    // Per-factory booking totals (stock is sizeless).
+    const { rows: booked } = await query(`
+      SELECT f.factory_id, f.name AS factory_name,
              COALESCE(SUM(bi.booked_qty),0)  AS booked_qty,
-             COALESCE(sl.sold_qty,0)         AS sold_qty,
-             COALESCE(sl.under_loading_qty,0) AS under_loading_qty,
              COALESCE(SUM(bi.balance_qty),0) AS balance_qty
         FROM factories f
-        CROSS JOIN sizes sz
-        LEFT JOIN products p ON p.size_mm = sz.size_mm
-        LEFT JOIN booking_items bi ON bi.factory_id = f.factory_id AND bi.product_id = p.product_id
-        LEFT JOIN (
-          SELECT si.factory_id, pr.size_mm,
-                 SUM(si.sale_qty) AS sold_qty,
-                 SUM(si.sale_qty) FILTER (WHERE EXISTS (SELECT 1 FROM dispatch_details dd WHERE dd.sale_id = s.sale_id)) AS under_loading_qty
-            FROM sale_items si
-            JOIN sales s ON s.sale_id = si.sale_id
-            JOIN products pr ON pr.product_id = si.product_id
-           WHERE s.status <> 'Cancelled'
-           GROUP BY si.factory_id, pr.size_mm
-        ) sl ON sl.factory_id = f.factory_id AND sl.size_mm = sz.size_mm
-       GROUP BY f.factory_id, f.name, sz.size_mm, sl.sold_qty, sl.under_loading_qty
-       ORDER BY f.factory_id, sz.size_mm`);
+        LEFT JOIN booking_items bi ON bi.factory_id = f.factory_id
+       GROUP BY f.factory_id, f.name
+       ORDER BY f.name`);
 
-    const byFactory = new Map<number, any>();
-    for (const r of rows) {
-      if (!byFactory.has(r.factory_id))
-        byFactory.set(r.factory_id, { factory_id: r.factory_id, factory_name: r.factory_name, booked_qty: 0, sold_qty: 0, under_loading_qty: 0, balance_qty: 0, sizes: [] });
-      const g = byFactory.get(r.factory_id);
-      g.booked_qty += Number(r.booked_qty);
-      g.sold_qty += Number(r.sold_qty);
-      g.under_loading_qty += Number(r.under_loading_qty);
-      g.balance_qty += Number(r.balance_qty);
-      g.sizes.push({ size_mm: r.size_mm, booked_qty: Number(r.booked_qty), sold_qty: Number(r.sold_qty), under_loading_qty: Number(r.under_loading_qty), balance_qty: Number(r.balance_qty) });
+    // Sold quantities per factory + size label (size lives only on the sale line now).
+    const { rows: sold } = await query(`
+      SELECT si.factory_id, si.size_mm,
+             SUM(si.sale_qty) AS sold_qty,
+             SUM(si.sale_qty) FILTER (WHERE EXISTS (SELECT 1 FROM dispatch_details dd WHERE dd.sale_id = s.sale_id)) AS under_loading_qty
+        FROM sale_items si
+        JOIN sales s ON s.sale_id = si.sale_id
+       WHERE s.status <> 'Cancelled'
+       GROUP BY si.factory_id, si.size_mm`);
+
+    const soldByFactory = new Map<number, any[]>();
+    for (const r of sold) {
+      if (!soldByFactory.has(r.factory_id)) soldByFactory.set(r.factory_id, []);
+      soldByFactory.get(r.factory_id)!.push({
+        size_mm: r.size_mm,
+        sold_qty: Number(r.sold_qty),
+        under_loading_qty: Number(r.under_loading_qty ?? 0),
+      });
     }
-    const factories = [...byFactory.values()];
+
+    const factories = booked.map((f) => {
+      const sizes = (soldByFactory.get(f.factory_id) ?? []).sort((a, b) => (a.size_mm ?? 999) - (b.size_mm ?? 999));
+      const sold_qty = sizes.reduce((t, x) => t + x.sold_qty, 0);
+      const under_loading_qty = sizes.reduce((t, x) => t + x.under_loading_qty, 0);
+      return {
+        factory_id: f.factory_id, factory_name: f.factory_name,
+        booked_qty: Number(f.booked_qty), balance_qty: Number(f.balance_qty),
+        sold_qty, under_loading_qty, sizes,
+      };
+    });
     const totals = factories.reduce((t, f) => ({
       booked_qty: t.booked_qty + f.booked_qty,
       sold_qty: t.sold_qty + f.sold_qty,
