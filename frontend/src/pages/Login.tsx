@@ -1,17 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Form, Input, Typography, Alert, Divider } from 'antd';
+import { Button, Card, Form, Input, Typography, Alert } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
 import { useAuth } from '../auth';
 import { apiError } from '../api';
-
-const DEMO = [
-  ['Admin', 'admin@psk.com', 'admin123'],
-  ['Accounts', 'accounts@psk.com', 'accounts123'],
-  ['Sales', 'sales@psk.com', 'sales123'],
-  ['Warehouse', 'warehouse@psk.com', 'ware123'],
-  ['Viewer', 'viewer@psk.com', 'viewer123'],
-];
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -42,7 +34,7 @@ export default function Login() {
           <Typography.Text type="secondary">Sign in to continue</Typography.Text>
         </div>
         {err && <Alert type="error" message={err} style={{ marginBottom: 16 }} showIcon />}
-        <Form form={form} layout="vertical" onFinish={submit} initialValues={{ email: 'admin@psk.com', password: 'admin123' }}>
+        <Form form={form} layout="vertical" onFinish={submit}>
           <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>
             <Input placeholder="you@psk.com" size="large" />
           </Form.Item>
@@ -51,12 +43,6 @@ export default function Login() {
           </Form.Item>
           <Button type="primary" htmlType="submit" block size="large" loading={loading}>Log in</Button>
         </Form>
-        <Divider plain style={{ fontSize: 12 }}>demo accounts</Divider>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {DEMO.map(([role, email, pw]) => (
-            <Button key={email} size="small" onClick={() => form.setFieldsValue({ email, password: pw })}>{role}</Button>
-          ))}
-        </div>
       </Card>
     </div>
   );
