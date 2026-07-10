@@ -208,6 +208,58 @@ salesRouter.patch(
   }),
 );
 
+// Edit a sale (to correct a mis-entry): releases the old FIFO allocation and
+// re-allocates the new line items. Blocked once the sale has been dispatched or
+// delivered (stock has physically moved).
+salesRouter.put(
+  '/:id',
+  saleWrite,
+  asyncHandler(async (req, res) => {
+    const body = saleSchema.parse(req.body);
+    const sale = await withTransaction(async (client) => {
+      const { rows } = await client.query(`SELECT * FROM sales WHERE sale_id=$1 FOR UPDATE`, [req.params.id]);
+      if (!rows[0]) throw new HttpError(404, 'Sale not found');
+      if (rows[0].status === 'Dispatched' || rows[0].status === 'Delivered') {
+        throw new HttpError(400, 'Cannot edit a sale that has been dispatched or delivered. Delete it instead.');
+      }
+      const { rows: d } = await client.query(`SELECT * FROM dealers WHERE dealer_id=$1`, [body.dealer_id]);
+      if (!d[0]) throw new HttpError(404, 'Dealer not found');
+      const salesPersonId = d[0].sales_person_id;
+      const creditDays = body.payment_type === 'Credit' ? (body.credit_days ?? null) : null;
+
+      // Release the old allocation (trigger restores stock) and clear old lines.
+      await client.query(
+        `DELETE FROM sale_allocations WHERE sale_item_id IN (SELECT sale_item_id FROM sale_items WHERE sale_id=$1)`,
+        [req.params.id],
+      );
+      await client.query(`DELETE FROM sale_items WHERE sale_id=$1`, [req.params.id]);
+
+      await client.query(
+        `UPDATE sales SET dealer_id=$1, sales_person_id=$2, sale_date=COALESCE($3,sale_date),
+                sale_invoice_no=$4, payment_type=$5, credit_days=$6,
+                credit_date=CASE WHEN $6::int IS NOT NULL THEN COALESCE($3,sale_date) + $6::int ELSE NULL END,
+                status='Pending'
+          WHERE sale_id=$7`,
+        [body.dealer_id, salesPersonId, body.sale_date ?? null, body.sale_invoice_no ?? null, body.payment_type,
+         creditDays, req.params.id],
+      );
+
+      for (const it of body.items) {
+        const productId = await getProductIdForSize(it.size_mm, client);
+        const { rows: sir } = await client.query(
+          `INSERT INTO sale_items (sale_id, factory_id, product_id, sale_qty, sale_rate, purchase_invoice_no) VALUES ($1,$2,$3,$4,$5,$6) RETURNING sale_item_id`,
+          [req.params.id, it.factory_id, productId, it.sale_qty, it.sale_rate, it.purchase_invoice_no ?? null],
+        );
+        await fifoAllocate(client, sir[0].sale_item_id, it.factory_id, productId, it.sale_qty);
+      }
+
+      const { rows: fresh } = await client.query(`SELECT * FROM sales WHERE sale_id=$1`, [req.params.id]);
+      return fresh[0];
+    });
+    res.json(sale);
+  }),
+);
+
 // Delete a sale (to correct a mis-entry). Releases its FIFO-allocated stock back
 // to Available and removes its items, dispatch and dealer payments.
 salesRouter.delete(

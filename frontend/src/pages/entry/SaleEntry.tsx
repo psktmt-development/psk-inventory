@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Alert, App, Button, Card, DatePicker, Descriptions, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography } from 'antd';
-import { PlusOutlined, DeleteOutlined, TruckOutlined, CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, TruckOutlined, CheckOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiError, fmtDate, inr, mt, STATUS_COLORS } from '../../api';
 import { useFetch } from '../../hooks';
@@ -18,6 +18,7 @@ export default function SaleEntry() {
   const factories = useFetch<any[]>('/masters/factories');
   const stock = useFetch<any[]>('/dashboards/stock-summary');
   const [open, setOpen] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
   const [form] = Form.useForm();
   const [detail, setDetail] = useState<any | null>(null);
   const [withDispatch, setWithDispatch] = useState(false);
@@ -55,7 +56,31 @@ export default function SaleEntry() {
   }, [items, stockMap]);
   const hasStockError = stockIssues.some((s) => s?.exceeded);
 
-  const openNew = () => { setOpen(true); stock.reload(); };
+  const openNew = () => { setEditId(null); form.resetFields(); form.setFieldsValue({ sale_date: dayjs(), payment_type: 'Direct', items: [{}] }); setWithDispatch(false); setOpen(true); stock.reload(); };
+
+  const openEdit = async (id: number) => {
+    try {
+      const { data } = await api.get(`/sales/${id}`);
+      if (data.status === 'Dispatched' || data.status === 'Delivered') {
+        message.warning('This sale is already dispatched/delivered — delete it instead of editing.');
+        return;
+      }
+      stock.reload();
+      form.resetFields();
+      form.setFieldsValue({
+        dealer_id: data.dealer_id,
+        sale_date: data.sale_date ? dayjs(data.sale_date) : dayjs(),
+        sale_invoice_no: data.sale_invoice_no,
+        payment_type: data.payment_type,
+        credit_days: data.credit_days,
+        items: (data.items ?? []).map((it: any) => ({
+          factory_id: it.factory_id, size_mm: it.size_mm, sale_qty: Number(it.sale_qty),
+          sale_rate: Number(it.sale_rate), purchase_invoice_no: it.purchase_invoice_no,
+        })),
+      });
+      setWithDispatch(false); setEditId(id); setDetail(null); setOpen(true);
+    } catch (e) { message.error(apiError(e)); }
+  };
 
   const buildPayload = () => {
     const v = form.getFieldsValue();
@@ -69,12 +94,18 @@ export default function SaleEntry() {
     };
   };
 
-  const resetForm = () => { setOpen(false); setWithDispatch(false); form.resetFields(); };
+  const resetForm = () => { setOpen(false); setEditId(null); setWithDispatch(false); form.resetFields(); };
 
   const save = async () => {
     if (hasStockError) { message.error('Some lines exceed available stock — fix the highlighted quantities before saving.'); return; }
     try {
       await form.validateFields();
+      if (editId) {
+        await api.put(`/sales/${editId}`, buildPayload());
+        message.success('Sale updated, stock re-allocated');
+        resetForm(); list.reload();
+        return;
+      }
       const { data: sale } = await api.post('/sales', buildPayload());
       // Optional dispatch entered during the sale
       const v = form.getFieldsValue();
@@ -140,22 +171,27 @@ export default function SaleEntry() {
               { title: 'Status', dataIndex: 'status', render: (s) => <Tag color={STATUS_COLORS[s]}>{s}</Tag> },
               { title: 'Payment', dataIndex: 'payment_stat', render: (s) => <Tag color={STATUS_COLORS[s]}>{s}</Tag> },
               ...(canWrite ? [{
-                title: '', width: 56, align: 'center' as const, fixed: 'right' as const, render: (_: any, r: any) => (
-                  <Popconfirm title="Delete this sale?" description="Permanently removes the sale and returns its stock to Available."
-                    okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => del(r.sale_id)}>
-                    <Button type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
-                  </Popconfirm>
+                title: '', width: 92, align: 'center' as const, fixed: 'right' as const, render: (_: any, r: any) => (
+                  <Space size={0} onClick={(e) => e.stopPropagation()}>
+                    <Button type="text" icon={<EditOutlined />} disabled={r.status === 'Dispatched' || r.status === 'Delivered'}
+                      title={r.status === 'Dispatched' || r.status === 'Delivered' ? 'Dispatched/Delivered — delete instead' : 'Edit'}
+                      onClick={() => openEdit(r.sale_id)} />
+                    <Popconfirm title="Delete this sale?" description="Permanently removes the sale and returns its stock to Available."
+                      okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => del(r.sale_id)}>
+                      <Button type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </Space>
                 ),
               }] : []),
             ]} />
         </Card>
       </Loading>
 
-      {/* New sale */}
-      <Modal title="New Sale" open={open} width={880} onCancel={resetForm}
+      {/* New / edit sale */}
+      <Modal title={editId ? `Edit Sale #${editId}` : 'New Sale'} open={open} width={880} onCancel={resetForm}
         footer={[
           <Button key="cancel" onClick={resetForm}>Cancel</Button>,
-          <Button key="save" type="primary" danger={hasStockError} disabled={hasStockError} onClick={() => save()}>Save sale</Button>,
+          <Button key="save" type="primary" danger={hasStockError} disabled={hasStockError} onClick={() => save()}>{editId ? 'Update sale' : 'Save sale'}</Button>,
         ]}>
         <Form form={form} layout="vertical" initialValues={{ sale_date: dayjs(), payment_type: 'Direct', items: [{}] }}>
           <Space size="large" wrap align="start">
@@ -209,7 +245,8 @@ export default function SaleEntry() {
             )}
           </Form.List>
 
-          {/* Dispatch during sale (optional) */}
+          {/* Dispatch during sale (optional) — only when creating a new sale */}
+          {!editId && <>
           <Divider style={{ margin: '18px 0 12px' }} />
           <Space style={{ marginBottom: withDispatch ? 12 : 0 }}>
             <TruckOutlined />
@@ -226,12 +263,16 @@ export default function SaleEntry() {
               <Form.Item name="delivery_location" label="Delivery location" extra="Blank = dealer address" style={{ minWidth: 220 }}><Input /></Form.Item>
             </Space>
           )}
+          </>}
         </Form>
       </Modal>
 
       {/* Sale detail */}
       <Modal title={`Sale ${detail?.sale_invoice_no ?? '#' + detail?.sale_id}`} open={!!detail} onCancel={() => setDetail(null)} width={840}
         footer={detail && canWrite ? [
+          detail.status !== 'Dispatched' && detail.status !== 'Delivered' && detail.status !== 'Cancelled' ? (
+            <Button key="e" icon={<EditOutlined />} onClick={() => openEdit(detail.sale_id)}>Edit</Button>
+          ) : null,
           detail.status !== 'Cancelled' && detail.status !== 'Delivered' ? (
             <Button key="c" onClick={async () => { try { await api.patch(`/sales/${detail.sale_id}/cancel`); message.success('Sale cancelled, stock released'); setDetail(null); list.reload(); } catch (e) { message.error(apiError(e)); } }}>Cancel sale</Button>
           ) : null,
